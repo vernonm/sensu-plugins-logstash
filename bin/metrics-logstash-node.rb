@@ -72,6 +72,24 @@ class LogstashNodeMetrics < Sensu::Plugin::Metric::CLI::Graphite
          short: '-e',
          long: '--https'
 
+  option :inputs,
+         description: 'Enables metrics for inputs',
+         short: '-i',
+         long: '--inputs',
+         default: false
+
+  option :outputs,
+         description: 'Enables metrics for outputs',
+         short: '-o',
+         long: '--outputs',
+         default: false
+
+  option :filters,
+         description: 'Enables metrics for filters',
+         short: '-f',
+         long: '--filters',
+         default: false
+
   def get_logstash_resource(resource)
     headers = {}
     if config[:user] && config[:password]
@@ -112,32 +130,45 @@ class LogstashNodeMetrics < Sensu::Plugin::Metric::CLI::Graphite
     metrics['process.open_file_descriptors'] = node['process']['open_file_descriptors']
     metrics['process.peak_open_file_descriptors'] = node['process']['peak_open_file_descriptors']
     metrics['process.max_file_descriptors'] = node['process']['max_file_descriptors']
+    metrics['process.cpu.percent'] = node['process']['cpu']['percent']
+    metrics['process.mem.total_virtual_in_bytes'] = node['process']['mem']['total_virtual_in_bytes']
 
     # logstash < 6.0
     if node.key?('pipeline')
       node['pipeline']['events'].each do |key, value|
         metrics["pipeline.events.#{key}"] = value
       end
-
-      node['pipeline']['plugins']['inputs'].each do |item|
-        item['events'] = {} unless item.key?('events')
-        metrics["pipeline.plugins.inputs.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
-        metrics["pipeline.plugins.inputs.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
-        metrics["pipeline.plugins.inputs.#{item['name']}.#{item['id']}.events.queue_push_duration_in_millis"] = \
-          item['events']['queue_push_duration_in_millis'].to_i || 0
+      if node['pipeline'].key?('queue') and node['pipeline']['queue']['type'] == 'persisted'
+        metrics['pipeline.queue.events'] = node['pipeline']['queue']['events']
+        metrics['pipeline.queue.size_in_bytes'] = node['pipeline']['queue']['capacity']['queue_size_in_bytes']
+        metrics['pipeline.queue.free_space_in_bytes'] = node['pipeline']['queue']['data']['free_space_in_bytes']
       end
 
-      node['pipeline']['plugins']['filters'].each do |item|
-        metrics["pipeline.plugins.filters.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
-        metrics["pipeline.plugins.filters.#{item['name']}.#{item['id']}.events.duration_in_millis"] = item['events']['duration_in_millis'].to_i || 0
-        metrics["pipeline.plugins.filters.#{item['name']}.#{item['id']}.matches"] = item['matches'].to_i if item.key?('matches')
+      if config[:inputs]
+        node['pipeline']['plugins']['inputs'].each do |item|
+          item['events'] = {} unless item.key?('events')
+          metrics["pipeline.plugins.inputs.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
+          metrics["pipeline.plugins.inputs.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
+          metrics["pipeline.plugins.inputs.#{item['name']}.#{item['id']}.events.queue_push_duration_in_millis"] = \
+            item['events']['queue_push_duration_in_millis'].to_i || 0
+        end
+      end
+      if config[:filters]
+        node['pipeline']['plugins']['filters'].each do |item|
+          item['events'] = {} unless item.key?('events')
+          metrics["pipeline.plugins.filters.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
+          metrics["pipeline.plugins.filters.#{item['name']}.#{item['id']}.events.duration_in_millis"] = item['events']['duration_in_millis'].to_i || 0
+          metrics["pipeline.plugins.filters.#{item['name']}.#{item['id']}.matches"] = item['matches'].to_i if item.key?('matches')
+        end
       end
 
-      node['pipeline']['plugins']['outputs'].each do |item|
-        item['events'] = {} unless item.key?('events')
-        metrics["pipeline.plugins.outputs.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
-        metrics["pipeline.plugins.outputs.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
-        metrics["pipeline.plugins.outputs.#{item['name']}.#{item['id']}.events.duration_in_millis"] = item['events']['duration_in_millis'].to_i || 0
+      if config[:outputs]
+        node['pipeline']['plugins']['outputs'].each do |item|
+          item['events'] = {} unless item.key?('events')
+          metrics["pipeline.plugins.outputs.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
+          metrics["pipeline.plugins.outputs.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
+          metrics["pipeline.plugins.outputs.#{item['name']}.#{item['id']}.events.duration_in_millis"] = item['events']['duration_in_millis'].to_i || 0
+        end
       end
     # logstash >= 6.0
     elsif node.key?('pipelines')
@@ -150,26 +181,38 @@ class LogstashNodeMetrics < Sensu::Plugin::Metric::CLI::Graphite
           end
         end
 
-        node['pipelines'][pipeline]['plugins']['inputs'].each do |item|
-          item['events'] = {} unless item.key?('events')
-          metrics["pipelines.#{pipeline}.plugins.inputs.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
-          metrics["pipelines.#{pipeline}.plugins.inputs.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
-          metrics["pipelines.#{pipeline}.plugins.inputs.#{item['name']}.#{item['id']}.events.queue_push_duration_in_millis"] = item['events']['queue_push_duration_in_millis'].to_i || 0 # rubocop:disable Metrics/LineLength
+        if node['pipeline'][pipeline].key?('queue') and node['pipeline'][pipeline]['queue']['type'] == 'persisted'
+          metrics["pipelinea.#{pipeline}.queue.events"] = node['pipeline'][pipeline]['queue']['events']
+          metrics["pipelines.#{pipeline}.queue.size_in_bytes"] = node['pipeline'][pipeline]['queue']['capacity']['queue_size_in_bytes']
+          metrics["pipelines.#{pipeline}.queue.free_space_in_bytes"] = node['pipeline'][pipeline]['queue']['data']['free_space_in_bytes']
         end
 
-        node['pipelines'][pipeline]['plugins']['filters'].each do |item|
-          item['events'] = {} unless item.key?('events')
-          metrics["pipelines.#{pipeline}.plugins.filters.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
-          metrics["pipelines.#{pipeline}.plugins.filters.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
-          metrics["pipelines.#{pipeline}.plugins.filters.#{item['name']}.#{item['id']}.events.duration_in_millis"] = item['events']['duration_in_millis'].to_i || 0 # rubocop:disable Metrics/LineLength
-          metrics["pipelines.#{pipeline}.plugins.filters.#{item['name']}.#{item['id']}.matches"] = item['matches'].to_i if item.key?('matches')
+        if config[:inputs]
+          node['pipelines'][pipeline]['plugins']['inputs'].each do |item|
+            item['events'] = {} unless item.key?('events')
+            metrics["pipelines.#{pipeline}.plugins.inputs.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
+            metrics["pipelines.#{pipeline}.plugins.inputs.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
+            metrics["pipelines.#{pipeline}.plugins.inputs.#{item['name']}.#{item['id']}.events.queue_push_duration_in_millis"] = item['events']['queue_push_duration_in_millis'].to_i || 0 # rubocop:disable Metrics/LineLength
+          end
         end
 
-        node['pipelines'][pipeline]['plugins']['outputs'].each do |item|
-          item['events'] = {} unless item.key?('events')
-          metrics["pipelines.#{pipeline}.plugins.outputs.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
-          metrics["pipelines.#{pipeline}.plugins.outputs.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
-          metrics["pipelines.#{pipeline}.plugins.outputs.#{item['name']}.#{item['id']}.events.duration_in_millis"] = item['events']['duration_in_millis'].to_i || 0 # rubocop:disable Metrics/LineLength
+        if config[:filters]
+          node['pipelines'][pipeline]['plugins']['filters'].each do |item|
+            item['events'] = {} unless item.key?('events')
+            metrics["pipelines.#{pipeline}.plugins.filters.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
+            metrics["pipelines.#{pipeline}.plugins.filters.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
+            metrics["pipelines.#{pipeline}.plugins.filters.#{item['name']}.#{item['id']}.events.duration_in_millis"] = item['events']['duration_in_millis'].to_i || 0 # rubocop:disable Metrics/LineLength
+            metrics["pipelines.#{pipeline}.plugins.filters.#{item['name']}.#{item['id']}.matches"] = item['matches'].to_i if item.key?('matches')
+          end
+        end
+
+        if config[:outputs]
+          node['pipelines'][pipeline]['plugins']['outputs'].each do |item|
+            item['events'] = {} unless item.key?('events')
+            metrics["pipelines.#{pipeline}.plugins.outputs.#{item['name']}.#{item['id']}.events.in"] = item['events']['in'].to_i || 0
+            metrics["pipelines.#{pipeline}.plugins.outputs.#{item['name']}.#{item['id']}.events.out"] = item['events']['out'].to_i || 0
+            metrics["pipelines.#{pipeline}.plugins.outputs.#{item['name']}.#{item['id']}.events.duration_in_millis"] = item['events']['duration_in_millis'].to_i || 0 # rubocop:disable Metrics/LineLength
+          end
         end
       end
     end
